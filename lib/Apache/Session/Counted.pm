@@ -5,10 +5,10 @@ use strict;
 use vars qw(@ISA);
 @ISA = qw(Apache::Session);
 use vars qw($VERSION $RELEASE_DATE);
-$VERSION = sprintf "%d.%03d", q$Revision: 1.113 $ =~ /(\d+)\.(\d+)/;
-$RELEASE_DATE = q$Date: 2000/10/31 23:23:18 $;
+$VERSION = sprintf "%d.%03d", q$Revision: 1.114 $ =~ /(\d+)\.(\d+)/;
+$RELEASE_DATE = q$Date: 2001/04/15 11:24:24 $;
 
-use Apache::Session;
+use Apache::Session 1.50;
 use File::CounterFile;
 
 {
@@ -26,15 +26,16 @@ use File::CounterFile;
     my $storefile = $self->storefilename($session);
     my $fh = gensym;
     unless ( open $fh, ">$storefile\0" ) {
-      warn "Could not open file $storefile for writing: $!
+      warn qq{Could not open file $storefile for writing: $!
 Maybe you haven't initialized the storage directory with
  use Apache::Session::Counted;
- Apache::Session::CountedStore->tree_init(\$dir,\$levels);
-I'm trying to band-aid by creating this directory";
+ Apache::Session::CountedStore->tree_init("$session->{args}{Directory}","$session->{args}{DirLevels}");
+I'm trying to band-aid by creating this directory};
       require File::Basename;
       my $dir = File::Basename::dirname($storefile);
       require File::Path;
       File::Path::mkpath($dir);
+      warn "mkdir on directory $dir successfully done.";
     }
     if ( open $fh, ">$storefile\0" ) {
       print $fh $session->{serialized}; # $fh->print might fail in some perls
@@ -222,9 +223,26 @@ sub generate_id {
   my $c;
   eval { $c = File::CounterFile->new($cf,"0"); };
   if ($@) {
-    warn "CounterFile problem. Retrying after removing $cf.";
-    unlink $cf; # May fail. stupid enough that we are here.
-    $c = File::CounterFile->new($cf,"0");
+    warn "Counterfile problem, trying to repair...";
+    if (-e $cf) {
+      warn "Retrying after removing $cf.";
+      unlink $cf; # May fail. stupid enough that we are here.
+      $c = File::CounterFile->new($cf,"0");
+    } else {
+      require File::Basename;
+      my $dirname = File::Basename::dirname($cf);
+      my @mkdir;
+      while (! -d $dirname) {
+        push @mkdir, $dirname;
+        $dirname = File::Basename::dirname($dirname);
+      }
+      while (@mkdir) {
+        my $dirname = pop @mkdir;
+        mkdir $dirname, 0755 or die "Couldn't mkdir $dirname. Please create it with appropriate permissions";
+      }
+      $c = File::CounterFile->new($cf,"0");
+    }
+    warn "Counterfile problem successfully reapired.";
   }
   my $rhexid = sprintf "%08x", $c->inc;
   my $hexid = scalar reverse $rhexid; # optimized for treestore. Not

@@ -10,6 +10,6 @@ WriteMakefile(
 sub MY::test {
   my($self)=@_;
   qq{test:\n\t$self->{NOECHO}echo No automated tests available.
-\t$self->{NOECHO}echo Please be warned, that this is ALPHA software.
+\t$self->{NOECHO}echo Please be warned, that this is BETA software.
 };
 }

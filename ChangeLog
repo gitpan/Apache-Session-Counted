@@ -1,3 +1,10 @@
+2001-04-15  Andreas J. Koenig  <andreas.koenig@anima.de>
+
+	* Counted.pm: "use Apache::Session 1.5" to make sure nobody tries
+	this with an older Apache::Session.
+
+	* We now try harder to repair an incomplete installation.
+
 2000-10-31  Andreas J. Koenig  <andreas.koenig@anima.de>
 
 	* materialize: HostID and HostURL feature implemented that
@@ -10,7 +17,7 @@
 	* update: if the directory for the storefile does not exist,
 	create it instead of croaking.
 
-	* materialize: if the session file doesn't exist, just warn not
+	* materialize: if the session file doesn't exist, just warn, don't
 	die and set data to empty hashref and the serialized data to the
 	counterpart.
 

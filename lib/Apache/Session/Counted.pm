@@ -4,8 +4,9 @@ use Apache::Session::Serialize::Storable;
 use strict;
 use vars qw(@ISA);
 @ISA = qw(Apache::Session);
-use vars qw($VERSION);
-$VERSION = sprintf "%d.%02d", q$Revision: 1.10 $ =~ /(\d+)\.(\d+)/;
+use vars qw($VERSION $RELEASE_DATE);
+$VERSION = sprintf "%d.%03d", q$Revision: 1.113 $ =~ /(\d+)\.(\d+)/;
+$RELEASE_DATE = q$Date: 2000/10/31 23:23:18 $;
 
 use Apache::Session;
 use File::CounterFile;
@@ -24,13 +25,23 @@ use File::CounterFile;
     my $session = shift;
     my $storefile = $self->storefilename($session);
     my $fh = gensym;
-    open $fh, ">$storefile\0" or
-      die "Could not open file $storefile for writing: $!
+    unless ( open $fh, ">$storefile\0" ) {
+      warn "Could not open file $storefile for writing: $!
 Maybe you haven't initialized the storage directory with
-use Apache::Session::Counted;
-Apache::Session::CountedStore->tree_init(\$dir,\$levels)";
-    print $fh $session->{serialized}; # $fh->print might fail in some perls
-    close $fh;
+ use Apache::Session::Counted;
+ Apache::Session::CountedStore->tree_init(\$dir,\$levels);
+I'm trying to band-aid by creating this directory";
+      require File::Basename;
+      my $dir = File::Basename::dirname($storefile);
+      require File::Path;
+      File::Path::mkpath($dir);
+    }
+    if ( open $fh, ">$storefile\0" ) {
+      print $fh $session->{serialized}; # $fh->print might fail in some perls
+      close $fh;
+    } else {
+      die "Giving up. Could not open file $storefile for writing: $!";
+    }
   }
   *insert = \&update;
 
@@ -38,16 +49,60 @@ Apache::Session::CountedStore->tree_init(\$dir,\$levels)";
   sub materialize {
     my $self    = shift;
     my $session = shift;
+    my $sessionID = $session->{data}{_session_id} or die "Got no session ID";
+    my($host) = $sessionID =~ /(?:([^:]+)(?::))/;
+    my($content);
+
+    if ($host &&
+        $session->{args}{HostID} &&
+        $session->{args}{HostID} ne $host
+       ) {
+      warn sprintf("configured hostID[%s]host from argument[%s]",
+                   $session->{args}{HostID},
+                   $host);
+      my $surl;
+      if (exists $session->{args}{HostURL}) {
+        $surl = $session->{args}{HostURL}->($host,$sessionID);
+      } else {
+        $surl = sprintf "http://%s/?SESSIONID=%s", $host, $sessionID;
+      }
+      warn "surl[$surl]";
+      require LWP::UserAgent;
+      require HTTP::Request::Common;
+      my $ua = LWP::UserAgent->new;
+      my $req = HTTP::Request::Common::GET $surl;
+      $content = $ua->request($req)->content;
+      $session->{serialized} = $content;
+      return;
+    }
+
     my $storefile = $self->storefilename($session);
     my $fh = gensym;
-    open $fh, "<$storefile\0" or
-        die "Could not open file $storefile for reading: $!";
-    local $/;
-    $session->{serialized} = <$fh>;
-    close $fh or die $!;
+    if ( open $fh, "<$storefile\0" ) {
+      local $/;
+      $session->{serialized} = <$fh>;
+      close $fh or die $!;
+      if ($content && $content ne $session->{serialized}) {
+        warn "content and serialized are NOT equal";
+        require Dumpvalue;
+        my $dumper = Dumpvalue->new;
+        $dumper->set(unctrl => "quote");
+        warn sprintf "content[%s]serialized[%s]",
+            $dumper->stringify($content),
+                $dumper->stringify($session->{serialized});
+      }
+    } else {
+      warn "Could not open file $storefile for reading: $!";
+      $session->{data} = {};
+      $session->{serialized} = $session->{serialize}->($session);
+    }
   }
 
   sub remove {
+    warn "remove not implemented"; # doesn't make sense for our
+                                   # concept of a session
+    return;
+
     my $self    = shift;
     my $session = shift;
     my $storefile = $self->storefilename($session);
@@ -93,7 +148,8 @@ Apache::Session::CountedStore->tree_init(\$dir,\$levels)";
     my $dir = $session->{args}{Directory};
     my $levels = $session->{args}{DirLevels} || 0;
     # here we depart from TreeStore:
-    my($file) = $session->{data}{_session_id} =~ /^([\da-f]+)/;
+    my $sessionID = $session->{data}{_session_id} or die "Got no session ID";
+    my($host,$file) = $sessionID =~ /(?:([^:]+)(?::))?([\da-f]+)/;
     die "Too short ID part '$file' in session ID'" if length($file)<8;
     while ($levels) {
       $file =~ s|((..){$levels})|$1/|;
@@ -120,16 +176,6 @@ sub TIEHASH {
   my $session_id = shift;
   my $args       = shift || {};
 
-  # Make sure that the arguments to tie make sense
-  # No. Don't Waste Time.
-  # $class->validate_id($session_id);
-  # if(ref $args ne "HASH") {
-  #   die "Additional arguments should be in the form of a hash reference";
-  # }
-
-  #Set-up the data structure and make it an object
-  #of our class
-
   my $self = {
               args         => $args,
 
@@ -151,7 +197,7 @@ sub TIEHASH {
 
   if (defined $session_id) {
     $self->make_old;
-    $self->restore;
+    $self->restore; # calls materialize and unserialize via Apache::Session
     if ($session_id eq $self->{data}->{_session_id}) {
       # Fine. Validated. Kind of authenticated.
       # ready for a new session ID, keeping state otherwise.
@@ -187,7 +233,11 @@ sub generate_id {
   # we have entropy as bad as rand(). Typically not very good.
   my $password = sprintf "%08x%08x", rand(0xffffffff), rand(0xffffffff);
 
-  $hexid . "_" . $password;
+  if (exists $self->{args}{HostID}) {
+    return sprintf "%s:%s_%s", $self->{args}{HostID}, $hexid, $password;
+  } else {
+    return $hexid . "_" . $password;
+  }
 }
 
 1;
@@ -205,27 +255,31 @@ Apache::Session::Counted - Session management via a File::CounterFile
                                 AlwaysSave => <boolean>
                                                  }
 
-=head1 ALPHA CODE ALERT
-
-This module is a proof of concept, not a final implementaion. There
-was very little interest in this module, so it is unlikely that I will
-invest much more work. If you find it useful and are interested in
-further development, please contact me personally, so we can talk
-about future development.
-
 =head1 DESCRIPTION
 
 This session module is based on Apache::Session, but it persues a
 different notion of a session, so you probably have to adjust your
 expectations a little.
 
-A session in this module only lasts from one request to the next. At
-that point a new session starts. Data are not lost though, the only
-thing that is lost from one request to the next is the session-ID. So
-the only things you have to treat differently than in Apache::Session
-are those parts that rely on the session-ID as a fixed token per user.
-Everything else remains the same. See below for a discussion what this
-model buys you.
+The dialog that is implemented within an HTTP based application is a
+nonlinear chain of events. The user can decide to use the back button
+at any time without informing the application about it. A proper
+session management must be prepared for this and must maintain the
+state of every single event. For handling the notion of a session and
+the notion of a registered user, the application has to differentiate
+carefully between global state of user data and a user's session
+related state. Some data may expire after a day, others may be
+regarded as unexpirable. This module is solely responsible for
+handling session related data. Saving unexpirable user related data
+must be handled by the calling application.
+
+In Apache::Session::Counted, a session-ID only lasts from one request
+to the next at which point a new session-ID is computed by the
+File::CounterFile module. Thus what you have to treat differently than
+in Apache::Session are those parts that rely on the session-ID as a
+fixed token per user. Accordingly, there is no option to delete a
+session. The remove method is simply disabled as old session data will
+be overwritten as soon as the counter is reset to zero.
 
 The usage of the module is via a tie as described in the synopsis. The
 arguments have the following meaning:
@@ -250,6 +304,25 @@ If false, only a STORE, DELETE or CLEAR trigger that the session file
 will be written when the tied hash goes out of scope. This has the
 advantage that you can retrieve an old session without storing its
 state again.
+
+=item HostID
+
+A string that serves as an identifier for the host we are running on.
+This string will become part of the session-ID and must not contain a
+colon. This can be used in a cluster environment so that a load
+balancer or other interested parties can retrieve the session data
+again.
+
+=item HostURL
+
+A callback that returns the service URL that can be called to get at
+the session data from another host. This is needed in a cluster
+environment. Two arguments are passed to this callback: HostID and
+Session-ID. The URL must return the serialized data in Storable's
+nfreeze format. The Apache::Session::Counted module can be used to set
+such an URL up. If HostURL is not defined, the default is
+
+    sprintf "http://%s/?SESSIONID=%s", <host>, <session-ID>;
 
 =back
 
@@ -310,26 +383,44 @@ that this is never the old one.
 
 As an implemenation detail it may be of interest to you, that the
 session ID in Apache::Session::Counted consists of two or three parts:
-an ordinary number which is a simple counter and a session-ID like the
-one in Apache::Session. The two parts are concatenated by an
-underscore. The first part is used as an identifier of the session and
-the second part is used as a password. The first part is easily
-predictable, but the second part is as unpredictable as
-Apache::Session's session ID. We use the first part for implementation
-details like storage on the disk and the second part to verify the
-ownership of that token. There may be soon available support for a
-third part. That which codes an alias for the machine that actually
-has stored the data--may be useful in clusters.
+an optional host alias given by the HostID paramter, followed by a
+colon. Then an ordinary number which is a simple counter which is
+followed by an underscore. And finally a session-ID like the one in
+Apache::Session. The number part is used as an identifier of the
+session and the ID part is used as a password. The number part is
+easily predictable, but the second part is reasonable unpredictable.
+We use the first part for implementation details like storage on the
+disk and the second part to verify the ownership of that token.
 
 =head1 PREREQUISITES
 
-Apache::Session::Counted needs Apache::Session,
-Apache::Session::TreeStore, and File::CounterFile, all available from the CPAN.
+Apache::Session::Counted needs Apache::Session and File::CounterFile,
+all available from the CPAN. The HostID and HostURL paramters for a
+cluster solution need LWP installed.
 
 =head1 EXAMPLES
 
-XXX Two examples should show the usage of a date string and the usage
-of an external cronjob to influence counter and cleanup.
+The following example resets the counter every 24 hours and keeps the
+totals of every day as a side effect:
+
+  my(@t) = localtime;
+  tie %session, 'Apache::Session::Counted', $sid,
+  {
+   Directory => ...,
+   DirLevels => ...,
+   CounterFile => sprintf("/some/dir/%04d-%02d-%02d", $t[5]+1900,$t[4]+1,$t[3])
+  };
+
+
+The same effect can be accomplished with a fixed filename and an
+external cronjob that resets the counter like so:
+
+  use File::CounterFile;
+  $c=File::CounterFile->new("/usr/local/apache/data/perl/sessiondemo/counter");
+  $c->lock;
+  $c-- while $c>0;
+  $c->unlock;
+
 
 =head1 AUTHOR
 
@@ -337,9 +428,9 @@ Andreas Koenig <andreas.koenig@anima.de>
 
 =head1 COPYRIGHT
 
-This software is copyright(c) 1999 Andreas Koenig. It is free software
-and can be used under the same terms as perl, i.e. either the GNU
-Public Licence or the Artistic License.
+This software is copyright(c) 1999,2000 Andreas Koenig. It is free
+software and can be used under the same terms as perl, i.e. either the
+GNU Public Licence or the Artistic License.
 
 =cut
 

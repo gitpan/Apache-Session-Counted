@@ -1,3 +1,19 @@
+2000-10-31  Andreas J. Koenig  <andreas.koenig@anima.de>
+
+	* materialize: HostID and HostURL feature implemented that
+	downloads sessiondata from a different host if we are running on
+	the wrong host
+
+	* remove: disabled remove as I suspect using remove with Counted
+	is always an error.
+
+	* update: if the directory for the storefile does not exist,
+	create it instead of croaking.
+
+	* materialize: if the session file doesn't exist, just warn not
+	die and set data to empty hashref and the serialized data to the
+	counterpart.
+
 2000-07-01  Andreas J. Koenig  <andreas.koenig@anima.de>
 
 	* Eliminated TreeStore as a separate module altogether and slurped

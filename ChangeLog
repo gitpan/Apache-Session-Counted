@@ -1,3 +1,8 @@
+2002-04-14  Andreas J. Koenig  <andreas.koenig@anima.de>
+
+	* Set the default timeout for retrieving foreign sessions to 10
+	seconds and made it configurable.
+
 2001-04-26  Andreas J. Koenig  <andreas.koenig@anima.de>
 
 	* Added a loadme test. That's better than nothing. Writing a

@@ -5,8 +5,8 @@ use strict;
 use vars qw(@ISA);
 @ISA = qw(Apache::Session);
 use vars qw($VERSION $RELEASE_DATE);
-$VERSION = sprintf "%d.%03d", q$Revision: 1.116 $ =~ /(\d+)\.(\d+)/;
-$RELEASE_DATE = q$Date: 2001/04/26 10:26:46 $;
+$VERSION = sprintf "%d.%03d", q$Revision: 1.117 $ =~ /(\d+)\.(\d+)/;
+$RELEASE_DATE = q$Date: 2002/04/14 07:09:12 $;
 
 use Apache::Session 1.50;
 use File::CounterFile;
@@ -71,8 +71,14 @@ I'm trying to band-aid by creating this directory};
       require LWP::UserAgent;
       require HTTP::Request::Common;
       my $ua = LWP::UserAgent->new;
+      $ua->timeout($session->{args}{Timeout} || 10);
       my $req = HTTP::Request::Common::GET $surl;
-      $content = $ua->request($req)->content;
+      my $result = $ua->request($req);
+      if ($result->is_success) {
+        $content = $result->content;
+      } else {
+        $content = Storable::nfreeze {};
+      }
       $session->{serialized} = $content;
       return;
     }
@@ -280,7 +286,10 @@ Apache::Session::Counted - Session management via a File::CounterFile
                                 Directory => <root of directory tree>,
                                 DirLevels => <number of dirlevels>,
                                 CounterFile => <filename for File::CounterFile>,
-                                AlwaysSave => <boolean>
+                                AlwaysSave => <boolean>,
+                                HostID => <string>,
+                                HostURL => <callback>,
+                                Timeout => <seconds>,
                                                  }
 
 =head1 DESCRIPTION
@@ -357,6 +366,11 @@ such an URL up. If HostURL is not defined, the default is
 
     sprintf "http://%s/?SESSIONID=%s", <host>, <session-ID>;
 
+=item Timeout
+
+Sets the timeout for LWP::UserAgent for retrieving a session from a
+different host. Default is 10 seconds.
+
 =back
 
 =head2 What this model buys you
@@ -403,12 +417,12 @@ session handler itself quite a bit and it is likely that this
 simplification results in an improved performance (not tested yet due
 to lack of benchmarking apps for sessions). There are less file stats
 and less sections that need locking, but without real world figures,
-it's hard to tell what's up.
+it's hard to tell.
 
 =back
 
 As with other modules in the Apache::Session collection, the tied hash
-contains a key <_session_id>. You must be aware that the value of this
+contains a key C<_session_id>. You must be aware that the value of this
 hash entry is not the same as the one you passed in when you retrieved
 the session (if you retrieved a session at all). So you have to make
 sure that you send your users a new session-id in each response, and
@@ -461,7 +475,7 @@ Andreas Koenig <andreas.koenig@anima.de>
 
 =head1 COPYRIGHT
 
-This software is copyright(c) 1999,2000 Andreas Koenig. It is free
+This software is copyright(c) 1999-2002 Andreas Koenig. It is free
 software and can be used under the same terms as perl, i.e. either the
 GNU Public Licence or the Artistic License.
 

@@ -1,0 +1,5 @@
+1999-11-08  Andreas J. Koenig  <andreas.koenig@anima.de>
+
+	* Silence failures due to lots of calls to locking methods. We do
+	not lock, period.
+

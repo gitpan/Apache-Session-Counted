@@ -5,8 +5,8 @@ use strict;
 use vars qw(@ISA);
 @ISA = qw(Apache::Session);
 use vars qw($VERSION $RELEASE_DATE);
-$VERSION = sprintf "%d.%03d", q$Revision: 1.114 $ =~ /(\d+)\.(\d+)/;
-$RELEASE_DATE = q$Date: 2001/04/15 11:24:24 $;
+$VERSION = sprintf "%d.%03d", q$Revision: 1.115 $ =~ /(\d+)\.(\d+)/;
+$RELEASE_DATE = q$Date: 2001/04/24 13:22:46 $;
 
 use Apache::Session 1.50;
 use File::CounterFile;
@@ -209,7 +209,10 @@ sub TIEHASH {
       $self->make_new;
     }
   }
-  $self->{data}->{_session_id} = $self->generate_id();
+  # if we have no counterfile, we cannot generate an ID, that's OK:
+  # this session will not need to be written.
+  $self->{data}->{_session_id} = $self->generate_id() if
+      $self->{args}{CounterFile};
   # no make_new here, session-ID doesn't count as data
 
   return $self;
@@ -313,7 +316,12 @@ directories, works in a tree of subdirectories.
 
 A filename to be used by the File::CounterFile module. By changing
 that file or the filename periodically, you can achieve arbitrary
-patterns of key generation.
+patterns of key generation. If you do not specify a CounterFile, you
+promise that in this session there is no need to generate a new ID and
+that the whole purpose of this object is to retrieve previously stored
+session data. Thus no new session file will be written. If you break
+your promise and write something to the session hash, the retrieved
+session file will be overwritten.
 
 =item AlwaysSave
 

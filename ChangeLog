@@ -1,3 +1,10 @@
+2001-04-24  Andreas J. Koenig  <andreas.koenig@anima.de>
+
+	* TIEHASH: Allow that the tie is called without CounterFile
+	argument. Previous versions died on that because they called
+	generate_id. Now we skip that if there is no CounterFile argument,
+	thus reusing the previous session file.
+
 2001-04-15  Andreas J. Koenig  <andreas.koenig@anima.de>
 
 	* Counted.pm: "use Apache::Session 1.5" to make sure nobody tries

@@ -1,3 +1,23 @@
+2000-07-01  Andreas J. Koenig  <andreas.koenig@anima.de>
+
+	* Eliminated TreeStore as a separate module altogether and slurped
+	its functionality into CountedStore. I saw no modular use for it
+	anymore.
+
+2000-06-25  Andreas J. Koenig  <andreas.koenig@anima.de>
+
+	* Made Counted.pm work with Apache::Session 1.51. Added Tree.pm
+	and TreeStore.pm that were dropped from the Apache::Session main
+	distribution. I have not yet understood all implications of the
+	(undocumented?) interface changes that happened between
+	Apache::Session 1.03 and 1.50, so I'm probably not very
+	conforming. Who cares please let me know.
+
+	PLEASE NOTE: This version does not work with Apache::Session 1.03
+	anymore and it is not even compatible with earlier versions of
+	itself too. So to upgrade from earlier versions it is necessary to
+	upgrade both Apache::Session and Apache::Session::Counted.
+	
 1999-11-08  Andreas J. Koenig  <andreas.koenig@anima.de>
 
 	* Silence failures due to lots of calls to locking methods. We do

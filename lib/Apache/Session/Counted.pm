@@ -1,22 +1,90 @@
 package Apache::Session::Counted;
+use Apache::Session::Serialize::Storable;
 
 use strict;
 use vars qw(@ISA);
 @ISA = qw(Apache::Session);
 use vars qw($VERSION);
-$VERSION = '1.05_01'; # sprintf "%d.%02d", q$Revision: 1.5 $ =~ /(\d+)\.(\d+)/;
+$VERSION = sprintf "%d.%02d", q$Revision: 1.10 $ =~ /(\d+)\.(\d+)/;
 
 use Apache::Session;
 use File::CounterFile;
 
 {
   package Apache::Session::CountedStore;
-  use Apache::Session::TreeStore;
   use Symbol qw(gensym);
-  use vars qw(@ISA);
-  @ISA = qw(Apache::Session::TreeStore);
 
-  sub insert { shift->SUPER::update(@_) };
+  use strict;
+
+  sub new { bless {}, shift }
+
+  # write. Note that we alias insert and update
+  sub update {
+    my $self    = shift;
+    my $session = shift;
+    my $storefile = $self->storefilename($session);
+    my $fh = gensym;
+    open $fh, ">$storefile\0" or
+      die "Could not open file $storefile for writing: $!
+Maybe you haven't initialized the storage directory with
+use Apache::Session::Counted;
+Apache::Session::CountedStore->tree_init(\$dir,\$levels)";
+    print $fh $session->{serialized}; # $fh->print might fail in some perls
+    close $fh;
+  }
+  *insert = \&update;
+
+  # retrieve
+  sub materialize {
+    my $self    = shift;
+    my $session = shift;
+    my $storefile = $self->storefilename($session);
+    my $fh = gensym;
+    open $fh, "<$storefile\0" or
+        die "Could not open file $storefile for reading: $!";
+    local $/;
+    $session->{serialized} = <$fh>;
+    close $fh or die $!;
+  }
+
+  sub remove {
+    my $self    = shift;
+    my $session = shift;
+    my $storefile = $self->storefilename($session);
+    unlink $storefile or
+        warn "Object $storefile does not exist in the data store";
+  }
+
+  sub tree_init {
+    my $self    = shift;
+    my $dir = shift;
+    my $levels = shift;
+    my $n = 0x100 ** $levels;
+    warn "Creating directory $dir and $n subdirectories in $levels level(s)\n";
+    warn "This may take a while\n" if $levels>1;
+    require File::Path;
+    $|=1;
+    my $feedback =
+        sub {
+          $n--;
+          printf "\r$n directories left             " unless $n % 256;
+          print "\n" unless $n;
+        };
+    File::Path::mkpath($dir);
+    make_dirs($dir,$levels,$feedback); # function for speed
+  }
+
+  sub make_dirs {
+    my($dir, $levels, $feedback) = @_;
+    $levels--;
+    for (my $i=0; $i<256; $i++) {
+      my $subdir = sprintf "%s/%02x", $dir, $i;
+      -d $subdir or mkdir $subdir, 0755 or die "Couldn't mkdir $subdir: $!";
+      $feedback->();
+      make_dirs($subdir, $levels, $feedback) if $levels;
+    }
+  }
+
   sub storefilename {
     my $self    = shift;
     my $session = shift;
@@ -33,11 +101,6 @@ use File::CounterFile;
     }
     "$dir/$file";
   }
-}
-
-sub get_object_store {
-  my $self = shift;
-  return new Apache::Session::CountedStore $self;
 }
 
 # Counted is locked by definition
@@ -68,18 +131,20 @@ sub TIEHASH {
   #of our class
 
   my $self = {
-             args         => $args,
+              args         => $args,
 
-             data         => { _session_id => $session_id },
-             # we always have read and write lock:
-
-             lock         => Apache::Session::READ_LOCK|Apache::Session::WRITE_LOCK,
-             lock_manager => undef,
-             object_store => undef,
-             status       => 0,
+              data         => { _session_id => $session_id },
+              # we always *have* read and write lock and need not care
+              lock         => Apache::Session::READ_LOCK|Apache::Session::WRITE_LOCK,
+              status       => 0,
+              lock_manager => undef,
+              generate     => undef,
+              serialize    => \&Apache::Session::Serialize::Storable::serialize,
+              unserialize  => \&Apache::Session::Serialize::Storable::unserialize,
             };
 
   bless $self, $class;
+  $self->{object_store} = Apache::Session::CountedStore->new($self);
 
   #If a session ID was passed in, this is an old hash.
   #If not, it is a fresh one.
@@ -118,7 +183,10 @@ sub generate_id {
   my $rhexid = sprintf "%08x", $c->inc;
   my $hexid = scalar reverse $rhexid; # optimized for treestore. Not
                                       # everything in one directory
-  my $password = $self->SUPER::generate_id;
+
+  # we have entropy as bad as rand(). Typically not very good.
+  my $password = sprintf "%08x%08x", rand(0xffffffff), rand(0xffffffff);
+
   $hexid . "_" . $password;
 }
 
@@ -136,6 +204,14 @@ Apache::Session::Counted - Session management via a File::CounterFile
                                 CounterFile => <filename for File::CounterFile>,
                                 AlwaysSave => <boolean>
                                                  }
+
+=head1 ALPHA CODE ALERT
+
+This module is a proof of concept, not a final implementaion. There
+was very little interest in this module, so it is unlikely that I will
+invest much more work. If you find it useful and are interested in
+further development, please contact me personally, so we can talk
+about future development.
 
 =head1 DESCRIPTION
 
@@ -158,7 +234,8 @@ arguments have the following meaning:
 
 =item Directory, DirLevels
 
-Compare the desription in L<Apache::Session::TreeStore>.
+Works similar to filestore but as most file systems are slow on large
+directories, works in a tree of subdirectories.
 
 =item CounterFile
 
@@ -226,19 +303,23 @@ it's hard to tell what's up.
 
 As with other modules in the Apache::Session collection, the tied hash
 contains a key <_session_id>. You must be aware that the value of this
-hash entry is not the same as the one you passed in. So make sure that
-you send your users a new session-id in each response, not the old one.
+hash entry is not the same as the one you passed in when you retrieved
+the session (if you retrieved a session at all). So you have to make
+sure that you send your users a new session-id in each response, and
+that this is never the old one.
 
 As an implemenation detail it may be of interest to you, that the
-session ID in Apache::Session::Counted consists of two parts: an
-ordinary number which is a simple counter and a session-ID like the
+session ID in Apache::Session::Counted consists of two or three parts:
+an ordinary number which is a simple counter and a session-ID like the
 one in Apache::Session. The two parts are concatenated by an
 underscore. The first part is used as an identifier of the session and
-the second part is used as a one-time password. The first part is
-easily predictable, but the second part is as unpredictable as
+the second part is used as a password. The first part is easily
+predictable, but the second part is as unpredictable as
 Apache::Session's session ID. We use the first part for implementation
 details like storage on the disk and the second part to verify the
-ownership of that token.
+ownership of that token. There may be soon available support for a
+third part. That which codes an alias for the machine that actually
+has stored the data--may be useful in clusters.
 
 =head1 PREREQUISITES
 

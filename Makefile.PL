@@ -7,9 +7,3 @@ WriteMakefile(
               'PREREQ_PM' => {"Apache::Session"=>1.50, File::CounterFile=>0},
 );
 
-sub MY::test {
-  my($self)=@_;
-  qq{test:\n\t$self->{NOECHO}echo No automated tests available.
-\t$self->{NOECHO}echo Please be warned, that this is BETA software.
-};
-}

@@ -1,3 +1,12 @@
+2001-04-26  Andreas J. Koenig  <andreas.koenig@anima.de>
+
+	* Added a loadme test. That's better than nothing. Writing a
+	comprehensive test seems pretty difficult.
+
+	* Remove a forgotten warning. Qualify remaining warnings as coming
+	from us. Protect against an unini warning when the sessionfile
+	that was requested by the user could not be read.
+
 2001-04-24  Andreas J. Koenig  <andreas.koenig@anima.de>
 
 	* TIEHASH: Allow that the tie is called without CounterFile

@@ -5,8 +5,8 @@ use strict;
 use vars qw(@ISA);
 @ISA = qw(Apache::Session);
 use vars qw($VERSION $RELEASE_DATE);
-$VERSION = sprintf "%d.%03d", q$Revision: 1.115 $ =~ /(\d+)\.(\d+)/;
-$RELEASE_DATE = q$Date: 2001/04/24 13:22:46 $;
+$VERSION = sprintf "%d.%03d", q$Revision: 1.116 $ =~ /(\d+)\.(\d+)/;
+$RELEASE_DATE = q$Date: 2001/04/26 10:26:46 $;
 
 use Apache::Session 1.50;
 use File::CounterFile;
@@ -26,7 +26,7 @@ use File::CounterFile;
     my $storefile = $self->storefilename($session);
     my $fh = gensym;
     unless ( open $fh, ">$storefile\0" ) {
-      warn qq{Could not open file $storefile for writing: $!
+      warn qq{A:S:Counted: Could not open file $storefile for writing: $!
 Maybe you haven't initialized the storage directory with
  use Apache::Session::Counted;
  Apache::Session::CountedStore->tree_init("$session->{args}{Directory}","$session->{args}{DirLevels}");
@@ -35,7 +35,7 @@ I'm trying to band-aid by creating this directory};
       my $dir = File::Basename::dirname($storefile);
       require File::Path;
       File::Path::mkpath($dir);
-      warn "mkdir on directory $dir successfully done.";
+      warn "A:S:Counted: mkdir on directory $dir successfully done.";
     }
     if ( open $fh, ">$storefile\0" ) {
       print $fh $session->{serialized}; # $fh->print might fail in some perls
@@ -58,16 +58,16 @@ I'm trying to band-aid by creating this directory};
         $session->{args}{HostID} &&
         $session->{args}{HostID} ne $host
        ) {
-      warn sprintf("configured hostID[%s]host from argument[%s]",
-                   $session->{args}{HostID},
-                   $host);
+      # warn sprintf("configured hostID[%s]host from argument[%s]",
+      #              $session->{args}{HostID},
+      #              $host);
       my $surl;
       if (exists $session->{args}{HostURL}) {
         $surl = $session->{args}{HostURL}->($host,$sessionID);
       } else {
         $surl = sprintf "http://%s/?SESSIONID=%s", $host, $sessionID;
       }
-      warn "surl[$surl]";
+      # warn "surl[$surl]";
       require LWP::UserAgent;
       require HTTP::Request::Common;
       my $ua = LWP::UserAgent->new;
@@ -84,31 +84,32 @@ I'm trying to band-aid by creating this directory};
       $session->{serialized} = <$fh>;
       close $fh or die $!;
       if ($content && $content ne $session->{serialized}) {
-        warn "content and serialized are NOT equal";
+        warn "A:S:Counted: content and serialized are NOT equal";
         require Dumpvalue;
         my $dumper = Dumpvalue->new;
         $dumper->set(unctrl => "quote");
-        warn sprintf "content[%s]serialized[%s]",
+        warn sprintf "A:S:Counted: content[%s]serialized[%s]",
             $dumper->stringify($content),
                 $dumper->stringify($session->{serialized});
       }
     } else {
-      warn "Could not open file $storefile for reading: $!";
+      warn "A:S:Counted: Could not open file $storefile for reading: $!";
       $session->{data} = {};
       $session->{serialized} = $session->{serialize}->($session);
     }
   }
 
   sub remove {
-    warn "remove not implemented"; # doesn't make sense for our
-                                   # concept of a session
+    warn "A:S:Counted: remove not implemented"; # doesn't make sense
+                                                # for our concept of a
+                                                # session
     return;
 
     my $self    = shift;
     my $session = shift;
     my $storefile = $self->storefilename($session);
     unlink $storefile or
-        warn "Object $storefile does not exist in the data store";
+        warn "A:S:Counted: Object $storefile does not exist in the data store";
   }
 
   sub tree_init {
@@ -116,8 +117,9 @@ I'm trying to band-aid by creating this directory};
     my $dir = shift;
     my $levels = shift;
     my $n = 0x100 ** $levels;
-    warn "Creating directory $dir and $n subdirectories in $levels level(s)\n";
-    warn "This may take a while\n" if $levels>1;
+    warn "A:S:Counted: Creating directory $dir
+ and $n subdirectories in $levels level(s)\n";
+    warn "A:S:Counted: This may take a while\n" if $levels>1;
     require File::Path;
     $|=1;
     my $feedback =
@@ -199,7 +201,12 @@ sub TIEHASH {
   if (defined $session_id) {
     $self->make_old;
     $self->restore; # calls materialize and unserialize via Apache::Session
-    if ($session_id eq $self->{data}->{_session_id}) {
+    if (
+        exists $self->{data} &&
+        exists $self->{data}{_session_id} &&
+        defined $self->{data}{_session_id} && # protect agains unini warning
+        $session_id eq $self->{data}{_session_id}
+       ) {
       # Fine. Validated. Kind of authenticated.
       # ready for a new session ID, keeping state otherwise.
       $self->make_modified if $self->{args}{AlwaysSave};
@@ -226,9 +233,9 @@ sub generate_id {
   my $c;
   eval { $c = File::CounterFile->new($cf,"0"); };
   if ($@) {
-    warn "Counterfile problem, trying to repair...";
+    warn "A:S:Counted: Counterfile problem, trying to repair...";
     if (-e $cf) {
-      warn "Retrying after removing $cf.";
+      warn "A:S:Counted: Retrying after removing $cf.";
       unlink $cf; # May fail. stupid enough that we are here.
       $c = File::CounterFile->new($cf,"0");
     } else {
@@ -245,7 +252,7 @@ sub generate_id {
       }
       $c = File::CounterFile->new($cf,"0");
     }
-    warn "Counterfile problem successfully reapired.";
+    warn "A:S:Counted: Counterfile problem successfully reapired.";
   }
   my $rhexid = sprintf "%08x", $c->inc;
   my $hexid = scalar reverse $rhexid; # optimized for treestore. Not
@@ -421,7 +428,7 @@ disk and the second part to verify the ownership of that token.
 =head1 PREREQUISITES
 
 Apache::Session::Counted needs Apache::Session and File::CounterFile,
-all available from the CPAN. The HostID and HostURL paramters for a
+all available from the CPAN. The HostID and HostURL parameters for a
 cluster solution need LWP installed.
 
 =head1 EXAMPLES

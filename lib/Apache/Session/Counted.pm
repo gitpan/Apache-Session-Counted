@@ -5,8 +5,8 @@ use strict;
 use vars qw(@ISA);
 @ISA = qw(Apache::Session);
 use vars qw($VERSION $RELEASE_DATE);
-$VERSION = sprintf "%d.%03d", q$Revision: 1.117 $ =~ /(\d+)\.(\d+)/;
-$RELEASE_DATE = q$Date: 2002/04/14 07:09:12 $;
+$VERSION = sprintf "%d.%03d", q$Revision: 1.118 $ =~ /(\d+)\.(\d+)/;
+$RELEASE_DATE = q$Date: 2002/04/15 12:39:07 $;
 
 use Apache::Session 1.50;
 use File::CounterFile;
@@ -68,14 +68,18 @@ I'm trying to band-aid by creating this directory};
         $surl = sprintf "http://%s/?SESSIONID=%s", $host, $sessionID;
       }
       # warn "surl[$surl]";
-      require LWP::UserAgent;
-      require HTTP::Request::Common;
-      my $ua = LWP::UserAgent->new;
-      $ua->timeout($session->{args}{Timeout} || 10);
-      my $req = HTTP::Request::Common::GET $surl;
-      my $result = $ua->request($req);
-      if ($result->is_success) {
-        $content = $result->content;
+      if ($surl) {
+        require LWP::UserAgent;
+        require HTTP::Request::Common;
+        my $ua = LWP::UserAgent->new;
+        $ua->timeout($session->{args}{Timeout} || 10);
+        my $req = HTTP::Request::Common::GET $surl;
+        my $result = $ua->request($req);
+        if ($result->is_success) {
+          $content = $result->content;
+        } else {
+          $content = Storable::nfreeze {};
+        }
       } else {
         $content = Storable::nfreeze {};
       }
@@ -365,6 +369,9 @@ nfreeze format. The Apache::Session::Counted module can be used to set
 such an URL up. If HostURL is not defined, the default is
 
     sprintf "http://%s/?SESSIONID=%s", <host>, <session-ID>;
+
+The callback can return false to signal that there is no session to
+retrieve (e.g. when the host or id argument is illegal).
 
 =item Timeout
 
